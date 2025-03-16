@@ -1,0 +1,114 @@
+clear, close all;
+
+part1_10Hz = struct("name", "Discrete Equivalent Method 10Hz", "z1", 0.9656, "p1", 0.6065, "K", 16.016, "T", 0.1);
+part1_4Hz = struct("name", "Discrete Equivalent Method 4Hz", "z1", 0.9162, "p1", 0.2865, "K", 11.923, "T", 0.25);
+part2_10Hz = struct("name", "Direct Design Method 10Hz", "z1", 0.9328, "p1", 0.5276, "K", 15, "T", 0.1);
+part2_4Hz = struct("name", "Direct Design Method 4Hz", "z1", 0.7, "p1", -0.35, "K", 12, "T", 0.25);
+%part2_4Hz = struct("name", "Direct Design Method 4Hz", "z1", 0.5, "p1", -0.4, "K", 20, "T", 0.25);
+
+part1_10Hz.results = simulate_compensator(part1_10Hz, 10);
+part1_4Hz.results = simulate_compensator(part1_4Hz, 10);
+part2_10Hz.results = simulate_compensator(part2_10Hz, 10);
+part2_4Hz.results = simulate_compensator(part2_4Hz, 10);
+
+
+plot_results(part1_10Hz)
+plot_results(part1_4Hz)
+plot_results(part2_10Hz)
+plot_results(part1_4Hz)
+
+print_info(part1_4Hz)
+
+function M_p = get_overshoot(output)
+    M_p = max(output) - 1;
+end
+
+function t_r = get_rise_time(time, output)
+    t_10_percent = 0;
+    t_90_percent = 0;
+    for n = 1:length(time)
+        t = time(n);
+        y = output(n);
+        if y >= 0.1
+            t_10_percent = t;
+            break
+        end
+    end
+
+    for n = 1:length(time)
+        t = time(n);
+        y = output(n);
+        if y >= 0.9
+            t_90_percent = t;
+            break
+        end
+    end
+
+    t_r = t_90_percent - t_10_percent;
+end
+
+function print_info(compensator)
+    results = compensator.results;
+    risetime = results.risetime;
+    overshoot = results.overshoot;
+    fprintf("=========RESULTS==========\n");
+    disp(compensator.name)
+    D = zpk(compensator.z1, compensator.p1, compensator.K, compensator.T)
+    fprintf('Rise Time: %.3fs\n', risetime);
+    fprintf('Overshoot: %.2f%%\n', overshoot);
+    if results.sat ~= 10
+        fprintf('Saturation Used: +-%.1f\n', results.sat);
+    end
+    fprintf("==========================\n");
+
+end
+
+function plot_results(compensator)
+    results = compensator.results;
+    figure()
+    plot(results.t, results.y, "LineWidth", 1.5);
+    hold on;
+    plot(results.t, results.r, "--k");
+    stairs(results.t_discrete, results.u ./ 10, 'Color', [1, 0.647, 0], "LineWidth", 1.5);
+    stairs(results.t_discrete, results.u_unsaturated ./ 10, "--", 'Color', [1, 0.647, 0], "LineWidth", 1.5);
+    hold off;
+    title(compensator.name)
+    legend("Output", "Reference", "Input/10")
+    xlabel("Time (s)")
+    ylabel("")
+end
+
+function results = simulate_compensator(compensator, sat)
+    fprintf("Simulating Compensator (%s)...\n", compensator.name)
+
+    % Give necessary parameters to Simulink
+    assignin("base", "z1", compensator.z1);
+    assignin("base", "p1", compensator.p1);
+    assignin("base", "K", compensator.K);
+    assignin("base", "T", compensator.T);
+    assignin("base", "sat", sat);
+    
+    % Simulate with simulink
+    out = sim("part_3_sim.slx");
+    evalin("base", "clear z1 p1 K T");
+
+    % Get time, output position (y), step input (r), and controller output
+    % (u) and unsaturated output (u_unsaturated)
+    t = out.y.time;
+    y = out.y.signals.values;
+    r = out.r.signals.values;
+    u = out.u_saturated.signals.values;
+    u_unsaturated = out.u.signals.values;
+    t_discrete = 0:compensator.T:compensator.T*(length(u)-1);
+  
+    results.risetime = get_rise_time(t, y);
+    results.overshoot = 100 * get_overshoot(y);
+
+    results.t = t;
+    results.t_discrete = t_discrete;
+    results.y = y;
+    results.r = r;
+    results.u = u;
+    results.u_unsaturated = u_unsaturated;
+    results.sat = sat;
+end
